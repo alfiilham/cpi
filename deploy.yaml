@@ -1,0 +1,130 @@
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  name: idempiere-news
+  namespace: idempiere-new
+  labels:
+    app: idempiere
+    app.kubernetes.io/component: idempiere
+    app.kubernetes.io/instance: idempiere
+    app.kubernetes.io/name: idempiere
+    app.kubernetes.io/part-of: idempiere-app
+    app.openshift.io/runtime-namespace: idempiere-new
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: idempiere
+  template:
+    metadata:
+      creationTimestamp: null
+      labels:
+        app: idempiere
+        deployment: idempiere
+      annotations:
+        openshift.io/generated-by: OpenShiftWebConsole
+    spec:
+      restartPolicy: Always
+      initContainers:
+      - name: init-copy-config
+        image: '10.100.11.111:8082/idempiere:v2.0'
+        command:
+          - sh
+          - '-c'
+          - |
+            if [ ! "$(ls -A /tmp/config)" ]; then
+              echo "Directory is empty. Copying files..."
+              cp -r /opt/idempiere/configuration/* /tmp/config
+            else
+              echo "Directory is not empty. Skipping file copy."
+            fi
+        volumeMounts:
+          - name: pvc-config
+            mountPath: /tmp/config
+      - name: init-copy-plugins
+        image: '10.100.11.111:8082/idempiere:v2.0'
+        command:
+          - sh
+          - '-c'
+          - |
+            if [ ! "$(ls -A /tmp/plugins)" ]; then
+              echo "Directory is empty. Copying files..."
+              cp -r /opt/idempiere/plugins/* /tmp/plugins
+            else
+              echo "Directory is not empty. Skipping file copy."
+            fi
+        volumeMounts:
+          - name: pvc-plugins
+            mountPath: /tmp/plugins
+      serviceAccountName: idempiere-sa
+      schedulerName: default-scheduler
+      terminationGracePeriodSeconds: 30
+      securityContext: {}
+      containers:
+        - resources: {}
+          terminationMessagePath: /dev/termination-log
+          name: idempiere
+          env:
+            - name: DB_HOST
+              value: postgres
+            - name: DB_PORT
+              value: '5432'
+            - name: DB_NAME
+              value: idempiere
+            - name: DB_USER
+              value: postgres
+            - name: DB_PASS
+              value: postgres
+            - name: DB_ADMIN_PASS
+              value: postgres
+            - name: IDEMPIERE_PORT
+              value: '8080'
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+          imagePullPolicy: IfNotPresent
+          volumeMounts:
+            - name: pvc-config
+              mountPath: /opt/idempiere/configuration
+            - name: pvc-plugins
+              mountPath: /opt/idempiere/plugins 
+          terminationMessagePolicy: File
+          image: '10.100.11.111:8082/idempiere:v2.0'
+      serviceAccount: idempiere-sa
+      volumes:
+        - name: pvc-config
+          persistentVolumeClaim:
+            claimName: config
+        - name: pvc-plugins
+          persistentVolumeClaim:
+            claimName: plugins
+      dnsPolicy: ClusterFirst
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: idempiere
+  namespace: idempiere-new
+spec:
+  selector:
+    app: idempiere
+  ports:
+    - protocol: TCP
+      port: 8080
+      targetPort: 8080
+---
+kind: Route
+apiVersion: route.openshift.io/v1
+metadata:
+  name: app
+  namespace: idempiere-new
+  labels: {}
+spec:
+  to:
+    kind: Service
+    name: idempiere
+  tls:
+    insecureEdgeTerminationPolicy: Redirect
+  port:
+    targetPort: 8080
+  alternateBackends: []
